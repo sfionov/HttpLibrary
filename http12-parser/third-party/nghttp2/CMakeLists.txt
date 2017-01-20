@@ -7,7 +7,7 @@ set(LT_CURRENT  23)
 set(LT_REVISION 0)
 set(LT_AGE      9)
 
-set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(Version)
 
 math(EXPR LT_SOVERSION "${LT_CURRENT} - ${LT_AGE}")
@@ -26,7 +26,7 @@ endif()
 add_definitions(-DHAVE_CONFIG_H)
 configure_file(cmakeconfig.h.in config.h)
 include_directories(
-  "${CMAKE_BINARY_DIR}" # for config.h
+  "${PROJECT_BINARY_DIR}" # for config.h
 )
 
 add_subdirectory(lib)

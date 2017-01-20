@@ -13,7 +13,7 @@ extern int http2_parser_input(struct http_parser_context *context, const char *d
 extern int http2_parser_reset(struct http_parser_context *context);
 extern int http2_parser_close(struct http_parser_context *context);
 
-__KHASH_TYPE(stream_to_context, int, struct http_context *);
+__KHASH_TYPE(stream_to_context, int, struct http_message *);
 
 /**
  * http_parser_context contains fields for stream multiplexing
@@ -21,6 +21,17 @@ __KHASH_TYPE(stream_to_context, int, struct http_context *);
 struct http2_parser_context {
     khash_t(stream_to_context) context_map;
 };
+
+
+
+
+
+
+
+
+
+
+
 
 
 #endif //HTTP_PARSER_HTTP2_H

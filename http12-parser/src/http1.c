@@ -43,7 +43,6 @@ struct http1_parser_context { /* structure has name for queue.h macros */
     // Pointer to parser settings
     http_parser_settings    *settings;
     // Pointer to message which is currently being constructed
-    struct http_context     *http_message;
     struct http_headers     *message;
     // Pointer to parent context
     parser_context          *parser_ctx;
@@ -78,7 +77,7 @@ struct http1_parser_context { /* structure has name for queue.h macros */
 /*
  * Body data callback. Usually it is parser_callbacks.http_request_body_data()
  */
-typedef void (*body_data_callback)(struct http_context *context, const char *at, size_t length);
+typedef void (*body_data_callback)(struct http_message *context, const char *at, size_t length);
 /*
  * Initializes zlib stream for current HTTP message body.
  * Used internally by http_parser_on_body().

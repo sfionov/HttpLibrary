@@ -13,12 +13,14 @@ set(SOURCE_FILES
         src/http1.h src/http1.c
         src/http2.h src/http2.c
         src/util.h src/util.c
-        src/parser.h src/parser.c)
+        src/parser.h src/parser.c
+        src/h2p.h src/h2p.c)
 
 include_directories(third-party/http-parser)
 include_directories(third-party/klib)
+include_directories(third-party/nghttp2/lib/includes)
 
-link_libraries(z pthread)
+link_libraries(z pthread nghttp2)
 add_library(httpparser-c ${SOURCE_FILES})
 set_property(TARGET httpparser-c PROPERTY POSITION_INDEPENDENT_CODE ON)
 
@@ -26,3 +28,6 @@ set_property(TARGET httpparser-c PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 enable_testing()
 # add_subdirectory(test)
+
+add_subdirectory(third-party/nghttp2)
+

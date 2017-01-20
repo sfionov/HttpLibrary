@@ -20,7 +20,7 @@ enum parser_type {
     HTTP2,
 };
 
-struct http_context {
+struct http_message {
     int stream_id;
     struct http_headers *headers;
 };
@@ -44,14 +44,14 @@ struct parser_callbacks {
      * HTTP/1.1 headers callback
      * @param http_context HTTP context (already contains parsed headers)
      */
-    void (*h1_headers)(struct http_context *http_context);
+    void (*h1_headers)(struct http_headers *http_context);
 
     /**
      * HTTP/1.1 start of data callback
      * @param http_context HTTP context
      * @return 1 tells parser to decompress data, 0 tells to remain data uncompressed
      */
-    bool (*h1_data_started)(struct http_context *http_context);
+    bool (*h1_data_started)(struct http_headers *http_context);
 
     /**
      * HTTP/1.1 data callback
@@ -59,13 +59,13 @@ struct parser_callbacks {
      * @param data Processed HTTP/1.1 body data
      * @param length Data length
      */
-    void (*h1_data)(struct http_context *http_context, const char *data, size_t length);
+    void (*h1_data)(struct http_message *http_context, const char *data, size_t length);
 
     /**
      * HTTP/1.1 end of data callback
      * @param http_context HTTP context
      */
-    void (*h1_data_finished)(struct http_context *http_context);
+    void (*h1_data_finished)(struct http_message *http_context);
 
     /**
      * HTTP/2 frame callback
@@ -77,14 +77,14 @@ struct parser_callbacks {
      * HTTP/2 header callback
      * @param http_context HTTP context (already contains parsed headers)
      */
-    void (*h2_headers)(struct http_context *http_context);
+    void (*h2_headers)(struct http_message *http_context);
 
     /**
      * HTTP/2 start of data callback
      * @param http_context HTTP context
      * @return tells parser to decompress data, 0 tells to remain data uncompressed
      */
-    bool (*h2_data_started)(struct http_context *http_context);
+    bool (*h2_data_started)(struct http_message *http_context);
 
     /**
      * HTTP/2 data callback
@@ -92,13 +92,13 @@ struct parser_callbacks {
      * @param data Processed HTTP/2 stream data
      * @param length Data length
      */
-    void (*h2_data)(struct http_context *http_context, const char *data, size_t length);
+    void (*h2_data)(struct http_message *http_context, const char *data, size_t length);
 
     /**
      * HTTP/2 end of data callback
      * @param http_context HTTP context
      */
-    void (*h2_data_finished)(struct http_context *http_context, int is_reset);
+    void (*h2_data_finished)(struct http_message *http_context, int is_reset);
 };
 
 /**
