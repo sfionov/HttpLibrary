@@ -17,7 +17,18 @@ extern "C" {
 enum parser_type {
     HTTP1_REQUEST = 1,
     HTTP1_RESPONSE,
-    HTTP2,
+    HTTP2_REQUEST,
+    HTTP2_RESPONSE
+};
+
+enum http_version {
+    HTTP1 = 1,
+    HTTP2 = 2,
+};
+
+enum connection_type {
+    HTTP_INCOMING = 1,
+    HTTP_OUTGOING = 2,
 };
 
 struct http_message {
@@ -31,7 +42,8 @@ struct http_parser_context {
         struct http2_parser_context *h2;
     };
     /* Parser type */
-    enum parser_type type;
+    enum http_version version;
+    enum connection_type type;
     /* Logger */
     logger *log;
     /* Callbacks and attachment */
@@ -84,7 +96,7 @@ struct parser_callbacks {
      * @param http_context HTTP context
      * @return tells parser to decompress data, 0 tells to remain data uncompressed
      */
-    bool (*h2_data_started)(struct http_message *http_context);
+    bool (*h2_data_started)(struct http_message *http_context, uint32_t stream_id);
 
     /**
      * HTTP/2 data callback
@@ -92,13 +104,13 @@ struct parser_callbacks {
      * @param data Processed HTTP/2 stream data
      * @param length Data length
      */
-    void (*h2_data)(struct http_message *http_context, const char *data, size_t length);
+    void (*h2_data)(struct http_message *http_context, uint32_t stream_id, const char *data, size_t length);
 
     /**
      * HTTP/2 end of data callback
      * @param http_context HTTP context
      */
-    void (*h2_data_finished)(struct http_message *http_context, int is_reset);
+    void (*h2_data_finished)(struct http_message *http_context, uint32_t stream_id, int is_reset);
 };
 
 /**
@@ -116,7 +128,8 @@ typedef enum error_type {
 
 
 extern int http_parser_open(logger *log,
-                            enum parser_type type,
+                            enum http_version version,
+                            enum connection_type type,
                             struct parser_callbacks *callbacks,
                             void *attachment,
                             struct http_parser_context **p_context);

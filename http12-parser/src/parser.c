@@ -9,25 +9,25 @@
 #include "http1.h"
 #include "http2.h"
 
-int http_parser_open(logger *log, enum parser_type type, struct parser_callbacks *callbacks, void *attachment,
+int http_parser_open(logger *log, enum http_version version, enum connection_type type,
+                     struct parser_callbacks *callbacks, void *attachment,
                      struct http_parser_context **p_context) {
     int r = 0;
     logger_log(log, LOG_LEVEL_TRACE, "http_parser_init()");
     *p_context = malloc(sizeof(struct http_parser_context));
     memset(*p_context, 0, sizeof(struct http_parser_context));
     struct http_parser_context *context = *p_context;
+    context->version = version;
     context->type = type;
     context->log = log;
     context->callbacks = callbacks;
     context->attachment = attachment;
-    switch (type) {
-        case HTTP1_REQUEST:
-            http1_parser_init(context, false);
-        case HTTP1_RESPONSE:
-            http1_parser_init(context, true);
+    switch (version) {
+        case HTTP1:
+            r = http1_parser_init(context);
             break;
         case HTTP2:
-            http2_parser_init(context);
+            r = http2_parser_init(context);
             break;
         default:
             r = PARSER_INVALID_ARGUMENT_ERROR;
@@ -39,9 +39,8 @@ int http_parser_open(logger *log, enum parser_type type, struct parser_callbacks
 }
 
 int http_parser_input(struct http_parser_context *context, const char *data, size_t length) {
-    switch (context->type) {
-        case HTTP1_REQUEST:
-        case HTTP1_RESPONSE:
+    switch (context->version) {
+        case HTTP1:
             return http1_parser_input(context, data, length);
         case HTTP2:
             return http2_parser_input(context, data, length);
@@ -51,9 +50,8 @@ int http_parser_input(struct http_parser_context *context, const char *data, siz
 }
 
 int http_parser_close(struct http_parser_context *context) {
-    switch (context->type) {
-        case HTTP1_REQUEST:
-        case HTTP1_RESPONSE:
+    switch (context->version) {
+        case HTTP1:
             return http1_parser_close(context);
         case HTTP2:
             return http2_parser_close(context);

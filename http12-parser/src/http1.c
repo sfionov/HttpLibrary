@@ -110,7 +110,7 @@ static void set_error(struct http1_parser_context *context, const char *msg);
 
 static content_encoding_t get_content_encoding(struct http1_parser_context *context);
 
-void parser_reset(struct http1_parser_context *context);
+static void parser_reset(struct http_parser_context *context);
 
 /**
  * Context by id hash map implementation
@@ -396,7 +396,7 @@ int http_parser_on_message_complete(http_parser *parser) {
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_message_complete(parser=%p)", parser);
     struct http_headers *message = context->message;
     if (context->have_body) {
-        context->callbacks->h1_data_finished(context->http_message);
+        context->callbacks->h1_data_finished(context->message);
     }
 
     parser_reset(context);
@@ -433,7 +433,7 @@ http_parser_settings _settings = {
  *  API implementation
  */
 
-int http1_parser_init(struct http_parser_context *h12_context, int is_response) {
+int http1_parser_init(struct http_parser_context *h12_context) {
     logger_log(h12_context->log, LOG_LEVEL_TRACE, "http1_parser_init(context=%p)", h12_context);
     int r = 0;
 
@@ -452,7 +452,8 @@ int http1_parser_init(struct http_parser_context *h12_context, int is_response) 
     return r;
 }
 
-void parser_reset(struct http1_parser_context *context) {
+void parser_reset(struct http_parser_context *h12_context) {
+    struct http1_parser_context *context = h12_context->h1;
     if (context->decode_out_buffer != NULL) {
         message_inflate_end(context);
     }
@@ -478,7 +479,7 @@ int parser_input(struct http_parser_context *h12_context, const char *data, size
     context->done = 0;
 
     if (HTTP_PARSER_ERRNO(context->parser) != HPE_OK || context->parser->type == HTTP_BOTH) {
-        http_parser_init(context->parser, h12_context->type == HTTP1_REQUEST ? HTTP_REQUEST : HTTP_RESPONSE);
+        http_parser_init(context->parser, h12_context->type == HTTP_INCOMING ? HTTP_REQUEST : HTTP_RESPONSE);
     }
 
     context->done = http_parser_execute(context->parser, context->settings,

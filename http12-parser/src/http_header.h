@@ -5,6 +5,10 @@
 #ifndef HTTP_PARSER_HTTP_HEADER_H
 #define HTTP_PARSER_HTTP_HEADER_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct http_header_field {
     char *name;
     char *value;
@@ -85,5 +89,8 @@ extern void destroy_http_message(struct http_headers *message);
  */
 extern void http_message_free(struct http_headers *message);
 
+#ifdef __cplusplus
+};
+#endif /* __cplusplus */
 
 #endif //HTTP_PARSER_HTTP_HEADER_H
