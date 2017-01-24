@@ -9,14 +9,6 @@
 #include <nghttp2/nghttp2.h>
 #include "parser.h"
 
-#undef _U_
-#ifdef __GNUC__
-#define _U_ __attribute(unused)
-#else
-#define _U_
-#endif /* __GNUC__ */
-
-
 extern int http2_parser_init(struct http_parser_context *context);
 extern int http2_parser_input(struct http_parser_context *context, const char *data, size_t length);
 extern int http2_parser_close(struct http_parser_context *context);

@@ -3,6 +3,7 @@
 //
 
 #include "http2.h"
+#include "util.h"
 
 #define H2P_DEBUG printf("h2p: %s\n", __func__);
 #define LOG_AND_RETURN(m, r) do { printf("h2p: %s\n", m); return r; } while(0)
@@ -160,7 +161,7 @@ int on_frame_recv_callback(nghttp2_session *session _U_,
     switch (frame->hd.type) {
         case NGHTTP2_HEADERS:
             if (frame->headers.hd.flags & NGHTTP2_FLAG_END_HEADERS) {
-                h12_context->callbacks->h2_headers(stream->headers, frame->headers.hd.stream_id);
+                h12_context->callbacks->h2_headers(h12_context->attachment, stream->headers, frame->headers.hd.stream_id);
             }
             break;
         default:
@@ -194,9 +195,9 @@ int on_data_chunk_recv_callback(nghttp2_session *session _U_,
 
         stream->id = (uint32_t) stream_id;
 
-        stream->need_decode = h12_context->callbacks->h2_data_started(stream->headers, stream->id);
+        stream->need_decode = h12_context->callbacks->h2_data_started(h12_context->attachment, stream->headers, stream->id);
 
-        h12_context->callbacks->h2_data(stream->headers, stream->id, (const char *) data, len);
+        h12_context->callbacks->h2_data(h12_context->attachment, stream->headers, stream->id, (const char *) data, len);
 
     } else {
         stream = kh_value(context->streams, iter);
@@ -204,8 +205,8 @@ int on_data_chunk_recv_callback(nghttp2_session *session _U_,
             LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
         }
 
-        stream->need_decode = h12_context->callbacks->h2_data_started(stream->headers, stream->id);
-        h12_context->callbacks->h2_data(stream->headers, stream->id, (const char *) data, len);
+        stream->need_decode = h12_context->callbacks->h2_data_started(h12_context->attachment, stream->headers, stream->id);
+        h12_context->callbacks->h2_data(h12_context->attachment, stream->headers, stream->id, (const char *) data, len);
     }
 
     return 0;
@@ -243,7 +244,7 @@ int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
         // RST_STREAM
     }
 
-    h12_context->callbacks->h2_data_finished(context, stream_id, error_code);
+    h12_context->callbacks->h2_data_finished(h12_context->attachment, stream->headers, stream_id, error_code);
 
     stream_destroy (stream);
     kh_del(h2_streams_ht, context->streams, iter);
@@ -350,6 +351,9 @@ int http2_parser_init(struct http_parser_context *h12_context) {
         fprintf(stderr, "nghttp2 returned non-zero status: %d\n", status);
         return status;
     }
+
+    h12_context->h2 = malloc(sizeof(struct http2_parser_context));
+    memset(h12_context->h2, 0, sizeof(struct http2_parser_context));
 
     h12_context->h2->session = ngh2_session;
 

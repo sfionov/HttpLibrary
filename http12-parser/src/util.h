@@ -7,6 +7,14 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include "http_header.h"
+
+#undef _U_
+#ifdef __GNUC__
+#define _U_ __attribute__((unused))
+#else
+#define _U_
+#endif /* __GNUC__ */
 
 /**
  * Appends chars from character array `src' to null-terminated string `dst'
@@ -38,5 +46,13 @@ static inline void set_chars(char **dst, const char *src, size_t len) {
     memcpy(*dst, src, len);
     (*dst)[len] = 0;
 }
+
+/**
+ * Serializes HTTP headers structure to valid HTTP/1.1 message (request or response)
+ * @param headers Pointer to HTTP headers structure
+ * @param p_length Pointer to variable where length of output will be written
+ * @return Non-null-terminated byte array containing HTTP/1.1 message
+ */
+char *http_headers_to_http1_message(const struct http_headers *headers, size_t *p_length);
 
 #endif //HTTP_PARSER_UTIL_H

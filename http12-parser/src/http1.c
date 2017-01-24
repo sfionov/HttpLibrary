@@ -8,8 +8,7 @@
 #include <http_parser.h>
 #include "util.h"
 
-#define PARSER_LOG(args...) logger_log(parser_ctx->log, args)
-#define CTX_LOG(args...) logger_log(context->parser_ctx->log, args)
+#define CTX_LOG(args...) logger_log(h12_context->log, args)
 #define HTTP_VERSION "HTTP/1.1"
 #define ZLIB_DECOMPRESS_CHUNK_SIZE 262144
 
@@ -35,16 +34,12 @@ struct http1_parser_context { /* structure has name for queue.h macros */
     char                    error_message[256];
     // Body callback error
     enum error_type         body_callback_error;
-    // Parser callbacks
-    struct parser_callbacks *callbacks;
     // Pointer to Node.js http_parser implementation
     http_parser             *parser;
     // Pointer to parser settings
     http_parser_settings    *settings;
     // Pointer to message which is currently being constructed
-    struct http_headers     *message;
-    // Pointer to parent context
-    parser_context          *parser_ctx;
+    struct http_headers     *headers;
 
     // State flags:
     // Message construction is done
@@ -76,20 +71,20 @@ struct http1_parser_context { /* structure has name for queue.h macros */
 /*
  * Body data callback. Usually it is parser_callbacks.http_request_body_data()
  */
-typedef void (*body_data_callback)(struct http_message *context, const char *at, size_t length);
+typedef void (*body_data_callback)(void *attachment, struct http_headers *headers, const char *data, size_t length);
 /*
  * Initializes zlib stream for current HTTP message body.
  * Used internally by http_parser_on_body().
  */
-static int message_inflate_init(struct http1_parser_context *context);
+static int message_inflate_init(struct http_parser_context *context);
 /*
  * Inflate current input buffer and call body_data_callback for each decompressed chunk
  */
-static int message_inflate(struct http1_parser_context *context, const char *data, size_t length, body_data_callback body_data);
+static int message_inflate(struct http_parser_context *context, const char *data, size_t length, body_data_callback body_data);
 /*
  * Deinitializes zlib stream for current HTTP message body.
  */
-static int message_inflate_end(struct http1_parser_context *context);
+static int message_inflate_end(struct http_parser_context *context);
 
 /*
  * Other utility functions.
@@ -130,75 +125,81 @@ struct parser_context {
  *  Internal callbacks:
  */
 int http_parser_on_message_begin(http_parser *parser) {
-    struct http1_parser_context *context = ((struct http1_parser_context *) parser->data);
+    struct http_parser_context *h12_context = (struct http_parser_context *) parser->data;
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_message_begin(parser=%p)", parser);
-    create_http_message(&context->message);
+    http_headers_create(&context->headers);
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_message_begin() returned %d", 0);
     return 0;
 }
 
 int http_parser_on_url(http_parser *parser, const char *at, size_t length) {
-    struct http1_parser_context *context = ((struct http1_parser_context *) parser->data);
+    struct http_parser_context *h12_context = (struct http_parser_context *) parser->data;
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_url(parser=%p, at=%.*s)", parser, (int) length, at);
-    struct http_headers *message = context->message;
+    struct http_headers *headers = context->headers;
     if (at != NULL && length > 0) {
-        append_chars(&message->url, at, length);
+        append_chars(&headers->url, at, length);
     }
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_url() returned %d", 0);
     return 0;
 }
 
 int http_parser_on_status(http_parser *parser, const char *at, size_t length) {
-    struct http1_parser_context *context = ((struct http1_parser_context *) parser->data);
+    struct http_parser_context *h12_context = (struct http_parser_context *) parser->data;
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_status(parser=%p, at=%.*s)", parser, (int) length, at);
-    struct http_headers *message = context->message;
+    struct http_headers *headers = context->headers;
     if (at != NULL && length > 0) {
-        append_chars(&message->status_string, at, length);
-        message->status_code = parser->status_code;
+        append_chars(&headers->status_string, at, length);
+        headers->status_code = parser->status_code;
     }
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_status() returned %d", 0);
     return 0;
 }
 
 int http_parser_on_header_field(http_parser *parser, const char *at, size_t length) {
-    struct http1_parser_context *context = ((struct http1_parser_context *) parser->data);
+    struct http_parser_context *h12_context = (struct http_parser_context *) parser->data;
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_header_field(parser=%p, at=%.*s)", parser, (int) length, at);
-    struct http_headers *message = context->message;
+    struct http_headers *headers = context->headers;
     if (at != NULL && length > 0) {
         if (!context->in_field) {
             context->in_field = 1;
-            http_headers_add_empty_header_field(message);
+            http_headers_add_empty_header_field(headers);
         }
-        append_chars(&http_headers_get_last_field(message)->name, at, length);
+        append_chars(&http_headers_get_last_field(headers)->name, at, length);
     }
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_header_field() returned %d", 0);
     return 0;
 }
 
 int http_parser_on_header_value(http_parser *parser, const char *at, size_t length) {
-    struct http1_parser_context *context = ((struct http1_parser_context *) parser->data);
+    struct http_parser_context *h12_context = (struct http_parser_context *) parser->data;
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_header_value(parser=%p, at=%.*s)", parser, (int) length, at);
-    struct http_headers *message = context->message;
+    struct http_headers *headers = context->headers;
     context->in_field = 0;
     if (at != NULL && length > 0) {
-        append_chars(&http_headers_get_last_field(message)->value, at, length);
+        append_chars(&http_headers_get_last_field(headers)->value, at, length);
     } else {
-        http_headers_get_last_field(message)->value = calloc(1, 1);
+        http_headers_get_last_field(headers)->value = calloc(1, 1);
     }
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_header_value() returned %d", 0);
     return 0;
 }
 
 int http_parser_on_headers_complete(http_parser *parser) {
-    struct http1_parser_context *context = ((struct http1_parser_context *) parser->data);
+    struct http_parser_context *h12_context = (struct http_parser_context *) parser->data;
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_headers_complete(parser=%p)", parser);
-    struct http_headers *message = context->message;
+    struct http_headers *headers = context->headers;
     const char *method;
     int skip = 0;
     switch (parser->type) {
         case HTTP_REQUEST:
             method = http_method_str((enum http_method) parser->method);
-            set_chars(&message->method, method, strlen(method));
+            set_chars(&headers->method, method, strlen(method));
             break;
         case HTTP_RESPONSE:
             break;
@@ -206,14 +207,15 @@ int http_parser_on_headers_complete(http_parser *parser) {
             break;
     }
 
-    context->callbacks->h1_headers(context->message);
+    h12_context->callbacks->h1_headers(h12_context->attachment, context->headers);
 
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_headers_complete() returned %d", skip);
     return skip;
 }
 
 int http_parser_on_body(http_parser *parser, const char *at, size_t length) {
-    struct http1_parser_context *context = ((struct http1_parser_context *) parser->data);
+    struct http_parser_context *h12_context = (struct http_parser_context *) parser->data;
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_body(parser=%p, length=%d)", parser, (int) length);
     context->have_body = 1;
     enum error_type r = PARSER_OK;
@@ -227,9 +229,9 @@ int http_parser_on_body(http_parser *parser, const char *at, size_t length) {
     }
 
     if (context->body_started == 0) {
-        context->need_decode = context->callbacks->h1_data_started(context->message);
+        context->need_decode = h12_context->callbacks->h1_data_started(h12_context->attachment, context->headers);
         if (context->need_decode) {
-            if (message_inflate_init(context) != 0) {
+            if (message_inflate_init(h12_context) != 0) {
                 set_error(context, context->zlib_stream.msg);
                 r = PARSER_ZLIB_ERROR;
                 goto out;
@@ -238,9 +240,9 @@ int http_parser_on_body(http_parser *parser, const char *at, size_t length) {
         context->body_started = 1;
     }
     if (context->content_encoding == CONTENT_ENCODING_IDENTITY) {
-        context->callbacks->h1_data(context->message, at, length);
+        h12_context->callbacks->h1_data(h12_context->attachment, context->headers, at, length);
     } else {
-        if (message_inflate(context, at, length, context->callbacks->h1_data) != 0) {
+        if (message_inflate(h12_context, at, length, h12_context->callbacks->h1_data) != 0) {
             set_error(context, context->zlib_stream.msg);
             return PARSER_ZLIB_ERROR;
         }
@@ -260,7 +262,8 @@ static void set_error(struct http1_parser_context *context, const char *msg) {
  * Initialize Zlib stream depending on Content-Encoding (gzip/deflate)
  * @param context Connection context
  */
-static int message_inflate_init(struct http1_parser_context *context) {
+static int message_inflate_init(struct http_parser_context *h12_context) {
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "message_inflate_init()");
     context->content_encoding = get_content_encoding(context);
     if (!context->need_decode || context->content_encoding == CONTENT_ENCODING_IDENTITY) {
@@ -294,9 +297,9 @@ static int message_inflate_init(struct http1_parser_context *context) {
 }
 
 static content_encoding_t get_content_encoding(struct http1_parser_context *context) {
-    struct http_headers *message = context->message;
+    struct http_headers *headers = context->headers;
     char *field_name = "Content-Encoding";
-    const char *value = http_headers_get_field(message, field_name);
+    const char *value = http_headers_get_field(headers, field_name);
     size_t value_length = value ? strlen(value) : 0;
     if (!strncasecmp(value, "gzip", value_length) || !strncasecmp(value, "x-gzip", value_length)) {
         return CONTENT_ENCODING_GZIP;
@@ -315,7 +318,8 @@ static content_encoding_t get_content_encoding(struct http1_parser_context *cont
  * @param body_data Data callback function
  * @return 0 if data is successfully decompressed, 1 in case of error
  */
-static int message_inflate(struct http1_parser_context *context, const char *data, size_t length, body_data_callback body_data) {
+static int message_inflate(struct http_parser_context *h12_context, const char *data, size_t length, body_data_callback body_data) {
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "message_inflate(data=%p, length=%d)", data, (int) length);
     int result;
     int r = 0;
@@ -350,7 +354,7 @@ static int message_inflate(struct http1_parser_context *context, const char *dat
             size_t processed = ZLIB_DECOMPRESS_CHUNK_SIZE - context->zlib_stream.avail_out;
             if (processed > 0) {
                 // Call callback function for each decompressed block
-                body_data(context, context->decode_out_buffer, processed);
+                body_data(h12_context->attachment, context->headers, context->decode_out_buffer, processed);
             }
         }
         if (result != Z_OK) {
@@ -366,7 +370,7 @@ static int message_inflate(struct http1_parser_context *context, const char *dat
     goto finish;
 
     error:
-    message_inflate_end(context); /* result ignored */
+    message_inflate_end(h12_context); /* result ignored */
     if (result != Z_STREAM_END) {
         fprintf(stderr, "Decompression error: %d\n", result);
         r = 1;
@@ -381,7 +385,8 @@ static int message_inflate(struct http1_parser_context *context, const char *dat
  * Deinitialize stream compression structures
  * @param context
  */
-static int message_inflate_end(struct http1_parser_context *context) {
+static int message_inflate_end(struct http_parser_context *h12_context) {
+    struct http1_parser_context *context = h12_context->h1;
     int result = inflateEnd(&context->zlib_stream);
     free(context->decode_in_buffer);
     context->decode_in_buffer = NULL;
@@ -391,25 +396,25 @@ static int message_inflate_end(struct http1_parser_context *context) {
 }
 
 int http_parser_on_message_complete(http_parser *parser) {
-    struct http1_parser_context *context = ((struct http1_parser_context *) parser->data);
+    struct http_parser_context *h12_context = (struct http_parser_context *) parser->data;
+    struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_message_complete(parser=%p)", parser);
-    struct http_headers *message = context->message;
     if (context->have_body) {
-        context->callbacks->h1_data_finished(context->message);
+        h12_context->callbacks->h1_data_finished(h12_context->attachment, context->headers);
     }
 
-    parser_reset(context);
+    parser_reset(h12_context);
 
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_message_complete() returned %d", 0);
     return 0;
 }
 
-int http_parser_on_chunk_header(http_parser *parser) {
+int http_parser_on_chunk_header(http_parser *parser _U_) {
     // ignore
     return 0;
 }
 
-int http_parser_on_chunk_complete(http_parser *parser) {
+int http_parser_on_chunk_complete(http_parser *parser _U_) {
     // ignore
     return 0;
 }
@@ -436,31 +441,33 @@ int http1_parser_init(struct http_parser_context *h12_context) {
     logger_log(h12_context->log, LOG_LEVEL_TRACE, "http1_parser_init(context=%p)", h12_context);
     int r = 0;
 
-    struct http1_parser_context *context = malloc(sizeof(struct http1_parser_context));
+    h12_context->h1 = malloc(sizeof(struct http1_parser_context));
+    memset(h12_context->h1, 0, sizeof(struct http1_parser_context));
+    struct http1_parser_context *context = h12_context->h1;
 
     context->settings = &_settings;
     context->parser = malloc(sizeof(http_parser));
 
-    context->parser->data = context;
+    context->parser->data = h12_context;
 
-    parser_reset(context);
+    parser_reset(h12_context);
 
     h12_context->h1 = context;
 
-    logger_log(h12_context->log, LOG_LEVEL_TRACE, "parser_connect() returned %d", r);
+    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http1_parser_init() returned %d", r);
     return r;
 }
 
-void parser_reset(struct http_parser_context *h12_context) {
+static void parser_reset(struct http_parser_context *h12_context) {
     struct http1_parser_context *context = h12_context->h1;
     if (context->decode_out_buffer != NULL) {
-        message_inflate_end(context);
+        message_inflate_end(h12_context);
     }
 
-    if (context->message != NULL) {
-        destroy_http_message(context->message);
+    if (context->headers != NULL) {
+        http_headers_free(context->headers);
     }
-    context->message = 0;
+    context->headers = 0;
     context->have_body = 0;
     context->body_started = 0;
     context->content_encoding = CONTENT_ENCODING_IDENTITY;
@@ -511,8 +518,12 @@ int http1_parser_input(struct http_parser_context *h12_context, const char *data
     return r;
 }
 
-int parser_connection_close(struct http1_parser_context *context) {
-    free(context);
+int http1_parser_close(struct http_parser_context *context) {
+    free(context->h1->headers);
+    context->h1->headers = NULL;
+    free(context->h1);
+    context->h1 = NULL;
+
     return 0;
 }
 
