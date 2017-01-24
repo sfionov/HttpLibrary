@@ -80,7 +80,7 @@ static int message_inflate_init(struct http_parser_context *context);
 /*
  * Inflate current input buffer and call body_data_callback for each decompressed chunk
  */
-static int message_inflate(struct http_parser_context *context, const char *data, size_t length, body_data_callback body_data);
+static int message_inflate(struct http_parser_context *context, const char *data, size_t length, body_data_callback data_callback);
 /*
  * Deinitializes zlib stream for current HTTP message body.
  */
@@ -207,7 +207,9 @@ int http_parser_on_headers_complete(http_parser *parser) {
             break;
     }
 
-    h12_context->callbacks->h1_headers(h12_context->attachment, context->headers);
+    if (h12_context->callbacks && h12_context->callbacks->h1_headers) {
+        h12_context->callbacks->h1_headers(h12_context->attachment, context->headers);
+    }
 
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_headers_complete() returned %d", skip);
     return skip;
@@ -229,7 +231,9 @@ int http_parser_on_body(http_parser *parser, const char *at, size_t length) {
     }
 
     if (context->body_started == 0) {
-        context->need_decode = h12_context->callbacks->h1_data_started(h12_context->attachment, context->headers);
+        if (h12_context->callbacks && h12_context->callbacks->h1_data_started) {
+            context->need_decode = h12_context->callbacks->h1_data_started(h12_context->attachment, context->headers);
+        }
         if (context->need_decode) {
             if (message_inflate_init(h12_context) != 0) {
                 set_error(context, context->zlib_stream.msg);
@@ -239,10 +243,16 @@ int http_parser_on_body(http_parser *parser, const char *at, size_t length) {
         }
         context->body_started = 1;
     }
+    body_data_callback data_callback = NULL;
+    if (h12_context->callbacks && h12_context->callbacks->h1_data) {
+        data_callback = h12_context->callbacks->h1_data;
+    }
     if (context->content_encoding == CONTENT_ENCODING_IDENTITY) {
-        h12_context->callbacks->h1_data(h12_context->attachment, context->headers, at, length);
+        if (data_callback) {
+            data_callback(h12_context->attachment, context->headers, at, length);
+        }
     } else {
-        if (message_inflate(h12_context, at, length, h12_context->callbacks->h1_data) != 0) {
+        if (message_inflate(h12_context, at, length, data_callback) != 0) {
             set_error(context, context->zlib_stream.msg);
             return PARSER_ZLIB_ERROR;
         }
@@ -315,10 +325,10 @@ static content_encoding_t get_content_encoding(struct http1_parser_context *cont
  * @param context Connection context
  * @param data Input data
  * @param length Input data length
- * @param body_data Data callback function
+ * @param data_callback Data callback function
  * @return 0 if data is successfully decompressed, 1 in case of error
  */
-static int message_inflate(struct http_parser_context *h12_context, const char *data, size_t length, body_data_callback body_data) {
+static int message_inflate(struct http_parser_context *h12_context, const char *data, size_t length, body_data_callback data_callback) {
     struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "message_inflate(data=%p, length=%d)", data, (int) length);
     int result;
@@ -354,7 +364,9 @@ static int message_inflate(struct http_parser_context *h12_context, const char *
             size_t processed = ZLIB_DECOMPRESS_CHUNK_SIZE - context->zlib_stream.avail_out;
             if (processed > 0) {
                 // Call callback function for each decompressed block
-                body_data(h12_context->attachment, context->headers, context->decode_out_buffer, processed);
+                if (data_callback) {
+                    data_callback(h12_context->attachment, context->headers, context->decode_out_buffer, processed);
+                }
             }
         }
         if (result != Z_OK) {
@@ -400,7 +412,9 @@ int http_parser_on_message_complete(http_parser *parser) {
     struct http1_parser_context *context = h12_context->h1;
     CTX_LOG(LOG_LEVEL_TRACE, "http_parser_on_message_complete(parser=%p)", parser);
     if (context->have_body) {
-        h12_context->callbacks->h1_data_finished(h12_context->attachment, context->headers);
+        if (h12_context->callbacks && h12_context->callbacks->h1_data_finished) {
+            h12_context->callbacks->h1_data_finished(h12_context->attachment, context->headers);
+        }
     }
 
     parser_reset(h12_context);
