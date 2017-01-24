@@ -99,9 +99,9 @@ int main(int argc, char **argv) {
     prepare("data/LICENSE-2.0.txt-HTTP-gzip.bin", &license_txt_http_gzip);
     prepare("data/LICENSE-2.0.txt-HTTP-gzip-chunked.bin", &license_txt_http_gzip_chunked);
 
-    logger *log = logger_open(NULL, LOG_LEVEL_TRACE, NULL, NULL);
+    logger *log = logger_open(NULL, LOG_LEVEL_INFO, NULL, NULL);
     struct http_parser_context *pctx;
-    if (http_parser_open(log, HTTP1, HTTP_INCOMING, &cbs, NULL, &pctx) != 0) {
+    if (http_parser_open(log, HTTP1, HTTP_CLIENT_CONNECTION, &cbs, NULL, &pctx) != 0) {
         fprintf(stderr, "Error creating parser\n");
         return 1;
     }

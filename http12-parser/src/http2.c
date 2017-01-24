@@ -333,10 +333,10 @@ int http2_parser_init(struct http_parser_context *h12_context) {
     nghttp2_session_callbacks_set_error_callback(ngh2_callbacks, error_callback);
 
     switch (h12_context->type) {
-        case HTTP_INCOMING:
+        case HTTP_SERVER_CONNECTION:
             status = nghttp2_session_server_new(&ngh2_session, ngh2_callbacks, h12_context);
             break;
-        case HTTP_OUTGOING:
+        case HTTP_CLIENT_CONNECTION:
             status = nghttp2_session_client_new(&ngh2_session, ngh2_callbacks, h12_context);
             break;
         default:

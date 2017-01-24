@@ -29,8 +29,8 @@ enum http_version {
 };
 
 enum connection_type {
-    HTTP_INCOMING = 1,
-    HTTP_OUTGOING = 2,
+    HTTP_SERVER_CONNECTION = 1,
+    HTTP_CLIENT_CONNECTION = 2,
 };
 
 struct http_message {

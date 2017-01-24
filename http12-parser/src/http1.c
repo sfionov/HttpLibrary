@@ -484,7 +484,7 @@ int http1_parser_input(struct http_parser_context *h12_context, const char *data
     context->done = 0;
 
     if (HTTP_PARSER_ERRNO(context->parser) != HPE_OK || context->parser->type == HTTP_BOTH) {
-        http_parser_init(context->parser, h12_context->type == HTTP_INCOMING ? HTTP_REQUEST : HTTP_RESPONSE);
+        http_parser_init(context->parser, h12_context->type == HTTP_SERVER_CONNECTION ? HTTP_REQUEST : HTTP_RESPONSE);
     }
 
     context->done = http_parser_execute(context->parser, context->settings,
@@ -514,7 +514,7 @@ int http1_parser_input(struct http_parser_context *h12_context, const char *data
     }
 
     finish:
-    CTX_LOG(LOG_LEVEL_TRACE, "parser_input() returned %d", r);
+    CTX_LOG(LOG_LEVEL_TRACE, "parser_input() returned %d: %s", r, context->error_message);
     return r;
 }
 
