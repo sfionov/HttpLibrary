@@ -3,24 +3,20 @@
 
 #include "parser.h"
 
-#define HTTP_REQUEST_RECEIVED       (1 << 0)
-#define HTTP_REQUEST_BODY_STARTED   (1 << 1)
-#define HTTP_REQUEST_BODY_DATA      (1 << 2)
-#define HTTP_REQUEST_BODY_FINISHED  (1 << 3)
-#define HTTP_RESPONSE_RECEIVED      (1 << 4)
-#define HTTP_RESPONSE_BODY_STARTED  (1 << 5)
-#define HTTP_RESPONSE_BODY_DATA     (1 << 6)
-#define HTTP_RESPONSE_BODY_FINISHED (1 << 7)
+#define EVENT_H1_HEADERS       (1 << 0)
+#define EVENT_H1_DATA_STARTED  (1 << 1)
+#define EVENT_H1_DATA          (1 << 2)
+#define EVENT_H1_DATA_FINISHED  (1 << 3)
 
 struct test_message {
-    transfer_direction_t direction;
+    enum connection_type type;
     int content_length;
-    int callbacks_mask;
+    int events_mask;
     char *data;
 };
 
 struct test_message messages[] = {
-{ DIRECTION_OUT, 0, HTTP_REQUEST_RECEIVED,
+{ HTTP_SERVER_CONNECTION, 0, EVENT_H1_HEADERS,
         "GET /test HTTP/1.1\r\n"
         "User-Agent: curl/7.18.0 (i486-pc-linux-gnu) libcurl/7.18.0 OpenSSL/0.9.8g zlib/1.2.3.3 libidn/1.1\r\n"
         "Host: 0.0.0.0=5000\r\n"
@@ -28,7 +24,7 @@ struct test_message messages[] = {
         "\r\n"
 },
 
-{ DIRECTION_IN, 219, HTTP_RESPONSE_RECEIVED | HTTP_RESPONSE_BODY_STARTED | HTTP_RESPONSE_BODY_DATA | HTTP_RESPONSE_BODY_FINISHED,
+{ HTTP_CLIENT_CONNECTION, 219, EVENT_H1_HEADERS | EVENT_H1_DATA_STARTED | EVENT_H1_DATA | EVENT_H1_DATA_FINISHED,
         "HTTP/1.1 301 Moved Permanently\r\n"
         "Location: http://www.google.com/\r\n"
         "Content-Type: text/html; charset=UTF-8\r\n"
@@ -47,7 +43,7 @@ struct test_message messages[] = {
         "</BODY></HTML>\r\n"
 },
 
-{ DIRECTION_OUT, 0, HTTP_REQUEST_RECEIVED,
+{ HTTP_SERVER_CONNECTION, 0, EVENT_H1_HEADERS,
         "GET /test HTTP/1.1\r\n"
         "User-Agent: curl/7.18.0 (i486-pc-linux-gnu) libcurl/7.18.0 OpenSSL/0.9.8g zlib/1.2.3.3 libidn/1.1\r\n"
         "Host: 0.0.0.0=5000\r\n"
@@ -55,7 +51,7 @@ struct test_message messages[] = {
         "\r\n"
 },
 
-{ DIRECTION_OUT, 4, HTTP_REQUEST_RECEIVED | HTTP_REQUEST_BODY_STARTED | HTTP_REQUEST_BODY_DATA | HTTP_REQUEST_BODY_FINISHED,
+{ HTTP_SERVER_CONNECTION, 4, EVENT_H1_HEADERS | EVENT_H1_DATA_STARTED | EVENT_H1_DATA | EVENT_H1_DATA_FINISHED,
         "POST / HTTP/1.1\r\n"
         "Host: www.example.com\r\n"
         "Content-Type: application/x-www-form-urlencoded\r\n"
@@ -64,7 +60,7 @@ struct test_message messages[] = {
         "q=42\r\n"
 },
 
-{ DIRECTION_IN, 65, HTTP_RESPONSE_RECEIVED | HTTP_RESPONSE_BODY_STARTED | HTTP_RESPONSE_BODY_DATA | HTTP_RESPONSE_BODY_FINISHED,
+{ HTTP_CLIENT_CONNECTION, 65, EVENT_H1_HEADERS | EVENT_H1_DATA_STARTED | EVENT_H1_DATA | EVENT_H1_DATA_FINISHED,
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/plain\r\n"
         "Transfer-Encoding: chunked\r\n"
@@ -79,7 +75,7 @@ struct test_message messages[] = {
         "\r\n"
 },
 
-{ DIRECTION_IN, 0, HTTP_RESPONSE_RECEIVED,
+{ HTTP_CLIENT_CONNECTION, 0, EVENT_H1_HEADERS,
         "HTTP/1.1 500 ВАСИЛИЙ\r\n"
         "Date: Fri, 5 Nov 2010 23:07:12 GMT+2\r\n"
         "Content-Length: 0\r\n"
@@ -87,7 +83,7 @@ struct test_message messages[] = {
         "\r\n"
 },
 
-{ DIRECTION_IN, 65, HTTP_RESPONSE_RECEIVED | HTTP_RESPONSE_BODY_STARTED | HTTP_RESPONSE_BODY_DATA | HTTP_RESPONSE_BODY_FINISHED,
+{ HTTP_CLIENT_CONNECTION, 65, EVENT_H1_HEADERS | EVENT_H1_DATA_STARTED | EVENT_H1_DATA | EVENT_H1_DATA_FINISHED,
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/plain\r\n"
         "Transfer-Encoding: chunked\r\n"
@@ -102,7 +98,7 @@ struct test_message messages[] = {
         "\r\n"
 },
 
-{ DIRECTION_OUT, 4, HTTP_REQUEST_RECEIVED | HTTP_REQUEST_BODY_STARTED | HTTP_REQUEST_BODY_DATA | HTTP_REQUEST_BODY_FINISHED,
+{ HTTP_SERVER_CONNECTION, 4, EVENT_H1_HEADERS | EVENT_H1_DATA_STARTED | EVENT_H1_DATA | EVENT_H1_DATA_FINISHED,
         "POST / HTTP/1.1\r\n"
         "Host: www.example.com\r\n"
         "Content-Type: application/x-www-form-urlencoded\r\n"
@@ -111,7 +107,7 @@ struct test_message messages[] = {
         "q=42\r\n"
 },
 
-{ DIRECTION_IN, 1, HTTP_RESPONSE_RECEIVED | HTTP_RESPONSE_BODY_STARTED | HTTP_RESPONSE_BODY_DATA | HTTP_RESPONSE_BODY_FINISHED,
+{ HTTP_CLIENT_CONNECTION, 1, EVENT_H1_HEADERS | EVENT_H1_DATA_STARTED | EVENT_H1_DATA | EVENT_H1_DATA_FINISHED,
         "HTTP/1.1 301 MovedPermanently\r\n"
         "Date: Wed, 15 May 2013 17:06:33 GMT\r\n"
         "Server: Server\r\n"

@@ -15,8 +15,8 @@ add_test(logger test_logger)
 # add_test(parser_util test_parser_util)
 
 # HTTP parser test
-#add_executable(test_http_parser test_http1_parser.h test_http1_parser.c)
-#add_test(http_parser test_http_parser)
+add_executable(test_http_parser test_http1_parser.h test_http1_parser.c)
+add_test(http_parser test_http_parser)
 
 # Decode test
 add_executable(test_decode test_http1_decode.c)
