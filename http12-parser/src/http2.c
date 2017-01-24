@@ -3,21 +3,9 @@
 //
 
 #include "http2.h"
-#include "h2p.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
-#define H2P_DEBUG printf("h2p: %s\n", __FUNCTION__);
-#define LOG_AND_RETURN(m, r) do { printf("h2p: %s\n", m); return r; } while(0);
-
-void deflate(nghttp2_hd_deflater *deflater,
-             nghttp2_hd_inflater *inflater, const nghttp2_nv *const nva,
-             size_t nvlen);
-
-int inflate_header_block(nghttp2_hd_inflater *inflater, uint8_t *in,
-                         size_t inlen, int final);
-
+#define H2P_DEBUG printf("h2p: %s\n", __func__);
+#define LOG_AND_RETURN(m, r) do { printf("h2p: %s\n", m); return r; } while(0)
 
 void stream_destroy(h2p_stream *stream) {
     free(stream);
@@ -51,34 +39,31 @@ int on_begin_headers_callback(nghttp2_session *session _U_,
 
     H2P_DEBUG
 
-    if (frame->hd.type != NGHTTP2_HEADERS) {
-        //context->last_frame_type = -1;
-        //context->last_stream_id = -1;
-        return 0;
-    }
-
-    iter = kh_get(h2_streams_ht, context->streams, frame->hd.stream_id);
+    iter = kh_get(h2_streams_ht, context->streams, (khint32_t) frame->hd.stream_id);
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1)
+        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
     } else {
         stream = kh_value(context->streams, iter);
     }
 
     if (stream->headers != NULL) {
-        if (stream->headers->nvlen != 0) {
+        printf("ERROR: stream->headers is already allocated");
+#if 0
+        if (stream->headers-> != 0) {
             free(stream->headers->nva);
         }
         free(stream->headers);
+#endif /* 0 */
     }
 
-    stream->headers = malloc (sizeof(nghttp2_headers));
-    memcpy(stream->headers, frame, sizeof(nghttp2_headers));
+//    stream->headers = malloc (sizeof(nghttp2_headers));
+//    memcpy(stream->headers, frame, sizeof(nghttp2_headers));
 
-    stream->headers->nva = malloc(stream->headers->nvlen *
-                                  sizeof(nghttp2_nv));
-    stream->nvlen = 0;
+    stream->headers->allocated_field_count += frame->headers.nvlen;
+    stream->headers->fields = realloc(stream->headers->fields, stream->headers->allocated_field_count *
+                                  sizeof(struct http_header_field));
 
     return 0;
 }
@@ -96,50 +81,47 @@ int on_header_callback(nghttp2_session *session _U_,
 
     H2P_DEBUG
 
-    iter = kh_get(h2_streams_ht, context->streams, frame->hd.stream_id);
+    iter = kh_get(h2_streams_ht, context->streams, (khint32_t) frame->hd.stream_id);
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1)
+        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
     } else {
         stream = kh_value(context->streams, iter);
     }
 
+    struct http_headers *headers = stream->headers;
     if (stream->headers == NULL) {
-        H2P_DEBUG ("WARNING: Memory for header was not allocated!\n");
+        H2P_DEBUG("WARNING: Memory for header was not allocated!\n");
     }
 
-    stream->headers->nva[stream->nvlen].name = malloc (namelen);
-    memcpy(stream->headers->nva[stream->nvlen].name, name, namelen);
-    stream->headers->nva[stream->nvlen].namelen = namelen;
-
-    stream->headers->nva[stream->nvlen].value = malloc (valuelen);
-    memcpy(stream->headers->nva[stream->nvlen].value, value, valuelen);
-    stream->headers->nva[stream->nvlen].valuelen = valuelen;
-
-    stream->headers->nva[stream->nvlen].flags = flags;
-
-    stream->nvlen++;
-
-    if (stream->nvlen == stream->headers->nvlen) {
-        context->callbacks->h2_headers(context, stream->headers->hd.stream_id,
-                                       stream->headers);
+    if (headers->field_count == headers->allocated_field_count) {
+        headers->allocated_field_count++;
+        headers->fields = realloc(headers->fields, headers->allocated_field_count * sizeof(struct http_header_field));
     }
 
-    if (stream->headers != NULL) {
-        if (stream->headers->nvlen != 0) {
-            free(stream->headers->nva);
-        }
-        free(stream->headers);
-    }
+    int i = headers->field_count;
+    headers->fields[i].name = malloc(namelen + 1);
+    memcpy(headers->fields[i].name, name, namelen);
+    headers->fields[i].name[namelen + 1] = '\0';
+
+    headers->fields[i].value = malloc(valuelen + 1);
+    memcpy(headers->fields[i].value, value, valuelen);
+    headers->fields[i].value[valuelen + 1] = '\0';
+
+    headers->field_count++;
 
     return 0;
 }
 
 int on_frame_recv_callback(nghttp2_session *session _U_,
                            const nghttp2_frame *frame, void *user_data) {
-    struct http_parser_context *context = (struct http_parser_context*)user_data;
+    struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
+    struct http2_parser_context *context = h12_context->h2;
     nghttp2_frame_hd *hd = (nghttp2_frame_hd *)frame;
+    h2p_stream *stream;
+    khiter_t iter;
+    int not_found = 0, push_ret = 0;
 
     H2P_DEBUG
 
@@ -166,6 +148,26 @@ int on_frame_recv_callback(nghttp2_session *session _U_,
     context->last_frame_type = -1;
 #endif
 
+    iter = kh_get(h2_streams_ht, context->streams, (khint32_t) frame->hd.stream_id);
+    not_found = (iter == kh_end(context->streams));
+
+    if (not_found) {
+        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
+    } else {
+        stream = kh_value(context->streams, iter);
+    }
+
+    switch (frame->hd.type) {
+        case NGHTTP2_HEADERS:
+            if (frame->headers.hd.flags & NGHTTP2_FLAG_END_HEADERS) {
+                h12_context->callbacks->h2_headers(stream->headers, frame->headers.hd.stream_id);
+            }
+            break;
+        default:
+            // do nothing
+            break;
+    }
+
     return 0;
 }
 
@@ -185,7 +187,7 @@ int on_data_chunk_recv_callback(nghttp2_session *session _U_,
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("Data before headers, this is incorrect\n", -1)
+        LOG_AND_RETURN("Data before headers, this is incorrect\n", -1);
         stream = malloc (sizeof(h2p_stream));
         iter = kh_put(h2_streams_ht, context->streams, stream_id, &push_ret);
         kh_value(context->streams, iter) = stream;
@@ -199,7 +201,7 @@ int on_data_chunk_recv_callback(nghttp2_session *session _U_,
     } else {
         stream = kh_value(context->streams, iter);
         if (stream->id != stream_id) {
-            LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1)
+            LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
         }
 
         stream->need_decode = h12_context->callbacks->h2_data_started(stream->headers, stream->id);
@@ -223,14 +225,14 @@ int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1)
+        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
     } else {
         stream = kh_value(context->streams, iter);
 
         if (stream->id != stream_id) {
-            stream_destroy (stream);
+            stream_destroy(stream);
             kh_del(h2_streams_ht, context->streams, iter);
-            LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1)
+            LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
         }
 
         if (stream->need_decode) {
@@ -241,7 +243,7 @@ int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
         // RST_STREAM
     }
 
-    context->callbacks->h2_data_finished(context, stream_id, error_code);
+    h12_context->callbacks->h2_data_finished(context, stream_id, error_code);
 
     stream_destroy (stream);
     kh_del(h2_streams_ht, context->streams, iter);
@@ -280,7 +282,8 @@ int error_callback(nghttp2_session *session, const char *msg,
 
     H2P_DEBUG;
 
-    context->callbacks->h2_error(context, H2P_ERROR_MESSAGE, msg);
+    fprintf(stderr, "ERROR: %s:%d: %s", __func__, __LINE__, msg);
+    // context->callbacks->h2_error(context, H2P_ERROR_MESSAGE, msg);
     return 0;
 }
 
@@ -299,9 +302,9 @@ int http2_parser_init(struct http_parser_context *h12_context) {
     nghttp2_session_callbacks_set_on_begin_frame_callback(ngh2_callbacks,
                                                           on_begin_frame_callback);
 
-    // frame recv
-    nghttp2_session_callbacks_set_on_frame_recv_callback (
-            ngh2_callbacks, on_frame_recv_callback);
+    // frame recv (end frame)
+    nghttp2_session_callbacks_set_on_frame_recv_callback(ngh2_callbacks,
+                                                         on_frame_recv_callback);
 
     // invalid frame recv
 #if 0
@@ -326,20 +329,29 @@ int http2_parser_init(struct http_parser_context *h12_context) {
                                                             on_begin_headers_callback);
 
     // error
-    nghttp2_session_callbacks_set_error_callback (ngh2_callbacks, error_callback);
+    nghttp2_session_callbacks_set_error_callback(ngh2_callbacks, error_callback);
 
-    if (h12_context->type == HTTP_INCOMING) {
-        status = nghttp2_session_server_new(&ngh2_session, ngh2_callbacks, h12_context);
-    } else {
-        status = nghttp2_session_client_new(&ngh2_session, ngh2_callbacks, h12_context);
+    switch (h12_context->type) {
+        case HTTP_INCOMING:
+            status = nghttp2_session_server_new(&ngh2_session, ngh2_callbacks, h12_context);
+            break;
+        case HTTP_OUTGOING:
+            status = nghttp2_session_client_new(&ngh2_session, ngh2_callbacks, h12_context);
+            break;
+        default:
+            // this should not happen
+            ngh2_session = NULL;
+            status = -1;
+            break;
     }
+    nghttp2_session_callbacks_del(ngh2_callbacks);
+
     if (status != 0) {
         fprintf(stderr, "nghttp2 returned non-zero status: %d\n", status);
         return status;
     }
 
     h12_context->h2->session = ngh2_session;
-    nghttp2_session_callbacks_del(ngh2_callbacks);
 
     h12_context->h2->streams = kh_init(h2_streams_ht);
 
@@ -348,7 +360,7 @@ int http2_parser_init(struct http_parser_context *h12_context) {
 
 
 int http2_parser_input(struct http_parser_context *h12_context, const char *data, size_t len) {
-    size_t nbytes;
+    ssize_t nbytes;
 
     if (h12_context == NULL || data == NULL || len == 0) return -1;
 
@@ -356,7 +368,7 @@ int http2_parser_input(struct http_parser_context *h12_context, const char *data
         LOG_AND_RETURN("nghttp2_session_want_read = 0", -1);
     }
 
-    nbytes = nghttp2_session_mem_recv(h12_context->h2->session, data, len);
+    nbytes = nghttp2_session_mem_recv(h12_context->h2->session, (const uint8_t *) data, len);
     //s = nghttp2_session_send (connection->ngh2_session);
 
     if (nbytes < 0) printf("ERROR: %s.\n", nghttp2_strerror((int) nbytes));
@@ -390,71 +402,6 @@ int http2_parser_close(struct http_parser_context *h12_context)  {
 #endif
     free(context);
     h12_context->h2 = NULL;
-
-    return 0;
-}
-
-//
-void deflate(nghttp2_hd_deflater *deflater,
-             nghttp2_hd_inflater *inflater, const nghttp2_nv *const nva,
-             size_t nvlen) {
-    ssize_t rv;
-    uint8_t *buf;
-    size_t buflen, outlen, i, sum;
-
-    sum = 0;
-
-    for (i = 0; i < nvlen; ++i) {
-        sum += nva[i].namelen + nva[i].valuelen;
-    }
-
-    buflen = nghttp2_hd_deflate_bound(deflater, nva, nvlen);
-    buf = malloc(buflen);
-
-    rv = nghttp2_hd_deflate_hd(deflater, buf, buflen, nva, nvlen);
-
-    if (rv < 0) {
-        printf("ERROR: %s.\n", nghttp2_strerror(rv));
-        free(buf);
-        return;
-    }
-
-    outlen = (size_t)rv;
-    /* We pass 1 to final parameter, because buf contains whole deflated
-       header data. */
-    rv = inflate_header_block(inflater, buf, outlen, 1);
-
-    free(buf);
-}
-
-int inflate_header_block(nghttp2_hd_inflater *inflater, uint8_t *in,
-                         size_t inlen, int final) {
-    ssize_t rv;
-
-    for (;;) {
-        nghttp2_nv nv;
-        int inflate_flags = 0;
-        size_t proclen;
-
-        rv = nghttp2_hd_inflate_hd(inflater, &nv, &inflate_flags, in, inlen, final);
-
-        if (rv < 0) {
-            return -1;
-        }
-
-        proclen = (size_t)rv;
-        in += proclen;
-        inlen -= proclen;
-
-        if (inflate_flags & NGHTTP2_HD_INFLATE_FINAL) {
-            nghttp2_hd_inflate_end_headers(inflater);
-            break;
-        }
-
-        if ((inflate_flags & NGHTTP2_HD_INFLATE_EMIT) == 0 && inlen == 0) {
-            break;
-        }
-    }
 
     return 0;
 }

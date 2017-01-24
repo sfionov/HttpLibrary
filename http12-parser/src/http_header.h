@@ -23,6 +23,7 @@ struct http_header_field {
  */
 struct http_headers {
     int field_count;
+    int allocated_field_count;
     struct http_header_field *fields;
     char *url;
     int status_code;

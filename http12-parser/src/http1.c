@@ -2,12 +2,11 @@
 // Created by s.fionov on 12.01.17.
 //
 
+#include "http1.h"
+
 #include <zlib.h>
 #include <http_parser.h>
-#include "parser.h"
-#include "http1.h"
 #include "util.h"
-#include "http_header.h"
 
 #define PARSER_LOG(args...) logger_log(parser_ctx->log, args)
 #define CTX_LOG(args...) logger_log(context->parser_ctx->log, args)
@@ -472,10 +471,9 @@ void parser_reset(struct http_parser_context *h12_context) {
 
 #define INPUT_LENGTH_AT_ERROR 1
 
-int parser_input(struct http_parser_context *h12_context, const char *data, size_t length) {
+int http1_parser_input(struct http_parser_context *h12_context, const char *data, size_t length) {
     logger_log(h12_context->log, LOG_LEVEL_TRACE, "parser_input(context=%p, len=%d)", h12_context, (int) length);
     struct http1_parser_context *context = h12_context->h1;
-    // TODO: this is wrong, null bytes are allowed in content
     context->done = 0;
 
     if (HTTP_PARSER_ERRNO(context->parser) != HPE_OK || context->parser->type == HTTP_BOTH) {

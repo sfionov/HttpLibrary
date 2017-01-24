@@ -29,10 +29,9 @@ struct h2p_frame_data
 
 typedef struct
 {
-    uint32_t          id;
-    int               need_decode; /* Just 0 or 1 if need or not to decode. */
-    struct headers   *headers;
-    int32_t           nvlen;
+    uint32_t            id;
+    int                 need_decode; /* Just 0 or 1 if need or not to decode. */
+    struct http_headers *headers;
 } h2p_stream;
 
 KHASH_MAP_INIT_INT(h2_streams_ht, h2p_stream*)

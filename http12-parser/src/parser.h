@@ -89,14 +89,14 @@ struct parser_callbacks {
      * HTTP/2 header callback
      * @param http_context HTTP context (already contains parsed headers)
      */
-    void (*h2_headers)(struct http_message *http_context);
+    void (*h2_headers)(struct http_message *http_context, int32_t stream_id);
 
     /**
      * HTTP/2 start of data callback
      * @param http_context HTTP context
      * @return tells parser to decompress data, 0 tells to remain data uncompressed
      */
-    bool (*h2_data_started)(struct http_message *http_context, uint32_t stream_id);
+    bool (*h2_data_started)(struct http_message *http_context, int32_t stream_id);
 
     /**
      * HTTP/2 data callback
@@ -104,13 +104,13 @@ struct parser_callbacks {
      * @param data Processed HTTP/2 stream data
      * @param length Data length
      */
-    void (*h2_data)(struct http_message *http_context, uint32_t stream_id, const char *data, size_t length);
+    void (*h2_data)(struct http_message *http_context, int32_t stream_id, const char *data, size_t length);
 
     /**
      * HTTP/2 end of data callback
      * @param http_context HTTP context
      */
-    void (*h2_data_finished)(struct http_message *http_context, uint32_t stream_id, int is_reset);
+    void (*h2_data_finished)(struct http_message *http_context, int32_t stream_id, int is_reset);
 };
 
 /**
