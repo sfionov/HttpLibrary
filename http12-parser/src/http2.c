@@ -8,7 +8,10 @@
 #define H2P_DEBUG printf("h2p: %s\n", __func__);
 #define LOG_AND_RETURN(m, r) do { printf("h2p: %s\n", m); return r; } while(0)
 
-void stream_destroy(h2p_stream *stream) {
+static void on_end_headers(const nghttp2_frame *frame, const struct http_parser_context *h12_context,
+                           const struct http2_stream_context *stream);
+
+void stream_destroy(struct http2_stream_context *stream) {
     free(stream);
 }
 
@@ -34,7 +37,7 @@ int on_begin_headers_callback(nghttp2_session *session _U_,
                               void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*)user_data;
     struct http2_parser_context *context = h12_context->h2;
-    h2p_stream *stream;
+    struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0, push_ret = 0;
 
@@ -76,7 +79,7 @@ int on_header_callback(nghttp2_session *session _U_,
                        void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
     struct http2_parser_context *context = h12_context->h2;
-    h2p_stream *stream;
+    struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0, push_ret = 0;
 
@@ -120,7 +123,7 @@ int on_frame_recv_callback(nghttp2_session *session _U_,
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
     struct http2_parser_context *context = h12_context->h2;
     nghttp2_frame_hd *hd = (nghttp2_frame_hd *)frame;
-    h2p_stream *stream;
+    struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0, push_ret = 0;
 
@@ -158,10 +161,15 @@ int on_frame_recv_callback(nghttp2_session *session _U_,
         stream = kh_value(context->streams, iter);
     }
 
+    /*
+     * Documentation ays that there is no ..._end_... callbacks, and this callback is fired after
+     * all frametype-specific callbacks.
+     * So if we need to do some finishing frametype-specific work, it must be done here.
+     */
     switch (frame->hd.type) {
         case NGHTTP2_HEADERS:
             if (frame->headers.hd.flags & NGHTTP2_FLAG_END_HEADERS) {
-                h12_context->callbacks->h2_headers(h12_context->attachment, stream->headers, frame->headers.hd.stream_id);
+                on_end_headers(frame, h12_context, stream);
             }
             break;
         default:
@@ -172,13 +180,20 @@ int on_frame_recv_callback(nghttp2_session *session _U_,
     return 0;
 }
 
+static void on_end_headers(const nghttp2_frame *frame, const struct http_parser_context *h12_context, 
+                           const struct http2_stream_context *stream) {
+    if (h12_context->callbacks && h12_context->callbacks->h2_headers) {
+        h12_context->callbacks->h2_headers(h12_context->attachment, stream->headers, frame->headers.hd.stream_id);
+    }
+}
+
 int on_data_chunk_recv_callback(nghttp2_session *session _U_,
                                 uint8_t flags _U_, int32_t stream_id,
                                 const uint8_t *data, size_t len,
                                 void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
     struct http2_parser_context *context = h12_context->h2;
-    h2p_stream *stream;
+    struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0, push_ret = 0;
 
@@ -188,25 +203,22 @@ int on_data_chunk_recv_callback(nghttp2_session *session _U_,
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("Data before headers, this is incorrect\n", -1);
-        stream = malloc (sizeof(h2p_stream));
-        iter = kh_put(h2_streams_ht, context->streams, stream_id, &push_ret);
-        kh_value(context->streams, iter) = stream;
-
-        stream->id = (uint32_t) stream_id;
-
-        stream->need_decode = h12_context->callbacks->h2_data_started(h12_context->attachment, stream->headers, stream->id);
-
-        h12_context->callbacks->h2_data(h12_context->attachment, stream->headers, stream->id, (const char *) data, len);
-
+        LOG_AND_RETURN("Data before headers, this is incorrect\n", NGHTTP2_ERR_INVALID_STATE);
     } else {
         stream = kh_value(context->streams, iter);
         if (stream->id != stream_id) {
-            LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
+            LOG_AND_RETURN("ERROR: Stream table corrupted!\n", NGHTTP2_ERR_INVALID_STATE);
         }
 
-        stream->need_decode = h12_context->callbacks->h2_data_started(h12_context->attachment, stream->headers, stream->id);
-        h12_context->callbacks->h2_data(h12_context->attachment, stream->headers, stream->id, (const char *) data, len);
+        if (h12_context->callbacks && h12_context->callbacks->h2_data_started) {
+            stream->need_decode = h12_context->callbacks->h2_data_started(
+                    h12_context->attachment, stream->headers, stream->id);
+        }
+
+        if (h12_context->callbacks && h12_context->callbacks->h2_data) {
+            h12_context->callbacks->h2_data(h12_context->attachment, stream->headers, stream->id,
+                                            (const char *) data, len);
+        }
     }
 
     return 0;
@@ -216,7 +228,7 @@ int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
                              uint32_t error_code, void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
     struct http2_parser_context *context = h12_context->h2;
-    h2p_stream *stream;
+    struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0;
 

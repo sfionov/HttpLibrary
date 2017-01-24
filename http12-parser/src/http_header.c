@@ -89,7 +89,7 @@ static int http_headers_add_field(struct http_headers *message, const char *name
 int http_headers_put_field(struct http_headers *headers,
                                   const char *name,
                                   const char *value) {
-    if (headers == NULL || name == NULL || value == NULL) return 1;
+    if (headers == NULL || name == NULL) return 1;
     int found = 0;
     for (int i = 0; i < headers->field_count; i++) {
         if (strncasecmp(headers->fields[i].name, name, strlen(name)) == 0)
@@ -102,7 +102,11 @@ int http_headers_put_field(struct http_headers *headers,
     }
     for (int i = 0; i < headers->field_count; i++) {
         if (strncasecmp(headers->fields[i].name, name, strlen(name)) == 0) {
-            set_chars(&headers->fields[i].value, value, strlen(value));
+            if (value != NULL) {
+                set_chars(&headers->fields[i].value, value, strlen(value));
+            } else {
+                set_chars(&headers->fields[i].value, "", 0);
+            }
             return 0;
         }
     }

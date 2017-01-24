@@ -10,9 +10,8 @@ add_executable(test_logger test_logger.c)
 add_test(logger test_logger)
 
 # Parser utility methods test
-# TODO: broken
-# add_executable(test_parser_util test_parser_util.c)
-# add_test(parser_util test_parser_util)
+add_executable(test_http_headers test_http_headers.c)
+add_test(http_headers test_http_headers)
 
 # HTTP parser test
 add_executable(test_http_parser test_http1_parser.h test_http1_parser.c)

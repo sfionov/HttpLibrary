@@ -19,14 +19,13 @@ struct h2p_frame_data
     size_t        size;
 };
 
-typedef struct
-{
+struct http2_stream_context {
     uint32_t            id;
     int                 need_decode; /* Just 0 or 1 if need or not to decode. */
     struct http_headers *headers;
-} h2p_stream;
+};
 
-KHASH_MAP_INIT_INT(h2_streams_ht, h2p_stream*)
+KHASH_MAP_INIT_INT(h2_streams_ht, struct http2_stream_context*);
 
 struct http2_parser_context {
     nghttp2_session         *session;
