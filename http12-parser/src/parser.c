@@ -13,7 +13,7 @@ int http_parser_open(logger *log, enum http_version version, enum connection_typ
                      struct parser_callbacks *callbacks, void *attachment,
                      struct http_parser_context **p_context) {
     int r = 0;
-    logger_log(log, LOG_LEVEL_TRACE, "http_parser_init()");
+    logger_log(log, LOG_LEVEL_TRACE, "http_parser_open()");
     *p_context = malloc(sizeof(struct http_parser_context));
     memset(*p_context, 0, sizeof(struct http_parser_context));
     struct http_parser_context *context = *p_context;
@@ -34,7 +34,7 @@ int http_parser_open(logger *log, enum http_version version, enum connection_typ
             break;
     }
 
-    logger_log(log, LOG_LEVEL_TRACE, "http_parser_init() returned with result: %d", r);
+    logger_log(log, LOG_LEVEL_TRACE, "http_parser_open() returned with result: %d", r);
     return r;
 }
 

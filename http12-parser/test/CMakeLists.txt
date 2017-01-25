@@ -21,3 +21,7 @@ add_test(http_parser test_http_parser)
 add_executable(test_decode test_http1_decode.c)
 file(COPY data DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 add_test(decode test_decode)
+
+# HTTP2
+add_executable(test_http2 test_http2.c)
+add_test(http2 test_http2)

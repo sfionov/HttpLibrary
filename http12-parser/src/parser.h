@@ -56,20 +56,20 @@ struct http_parser_context {
 struct parser_callbacks {
     /**
      * HTTP/1.1 headers callback
-     * @param http_context HTTP context (already contains parsed headers)
+     * @param headers HTTP headers of current HTTP message
      */
     void (*h1_headers)(void *attachment, struct http_headers *headers);
 
     /**
      * HTTP/1.1 start of data callback
-     * @param http_context HTTP context
+     * @param headers HTTP headers of current HTTP message
      * @return 1 tells parser to decompress data, 0 tells to remain data uncompressed
      */
     bool (*h1_data_started)(void *attachment, struct http_headers *headers);
 
     /**
      * HTTP/1.1 data callback
-     * @param http_context HTTP context
+     * @param headers HTTP headers of current HTTP message
      * @param data Processed HTTP/1.1 body data
      * @param length Data length
      */
@@ -77,7 +77,7 @@ struct parser_callbacks {
 
     /**
      * HTTP/1.1 end of data callback
-     * @param http_context HTTP context
+     * @param headers HTTP headers of current HTTP message
      */
     void (*h1_data_finished)(void *attachment, struct http_headers *headers);
 
@@ -89,20 +89,20 @@ struct parser_callbacks {
 
     /**
      * HTTP/2 header callback
-     * @param http_context HTTP context (already contains parsed headers)
+     * @param headers HTTP headers of current HTTP message
      */
     void (*h2_headers)(void *attachment, struct http_headers *headers, int32_t stream_id);
 
     /**
      * HTTP/2 start of data callback
-     * @param http_context HTTP context
+     * @param headers HTTP headers of current HTTP message
      * @return tells parser to decompress data, 0 tells to remain data uncompressed
      */
     bool (*h2_data_started)(void *attachment, struct http_headers *headers, int32_t stream_id);
 
     /**
      * HTTP/2 data callback
-     * @param http_context HTTP context
+     * @param headers HTTP headers of current HTTP message
      * @param data Processed HTTP/2 stream data
      * @param length Data length
      */
@@ -110,9 +110,16 @@ struct parser_callbacks {
 
     /**
      * HTTP/2 end of data callback
-     * @param http_context HTTP context
+     * @param headers HTTP headers of current HTTP message
      */
     void (*h2_data_finished)(void *attachment, struct http_headers *headers, int32_t stream_id, int is_reset);
+
+    /**
+     * HTTP protocol has generated raw data output (in result of send methods or internal logic)
+     * @param data Raw output data to write to socket
+     * @param len Length of data
+     */
+    void (*raw_output)(void *attachment, const char *data, size_t len);
 };
 
 /**
@@ -139,6 +146,14 @@ extern int http_parser_open(logger *log,
 extern int http_parser_input(struct http_parser_context *context, const char *data, size_t length);
 
 extern int http_parser_close(struct http_parser_context *context);
+
+extern int http_parser_h1_send_headers(struct http_parser_context *context, struct http_headers *headers);
+extern int http_parser_h1_send_data(struct http_parser_context *context, const char *data, size_t len, bool eof);
+extern int http_parser_h2_send_settings(struct http_parser_context *context );
+extern int http_parser_h2_send_headers(struct http_parser_context *context, int32_t stream_id, struct http_headers *headers);
+extern int http_parser_h2_send_data(struct http_parser_context *context, int32_t stream_id, const char *data, size_t len, bool eof);
+extern int http_parser_h2_reset_stream(struct http_parser_context *context, int32_t stream_id, int error_code);
+extern int http_parser_h2_goaway(struct http_parser_context *context, int error_code);
 
 #ifdef __cplusplus
 };

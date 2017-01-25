@@ -2,6 +2,7 @@
 // Created by s.fionov on 12.01.17.
 //
 
+#include <nghttp2/nghttp2.h>
 #include "http2.h"
 #include "util.h"
 
@@ -118,6 +119,17 @@ int on_header_callback(nghttp2_session *session _U_,
     return 0;
 }
 
+ssize_t on_send_callback(nghttp2_session *session,
+                         const uint8_t *data, size_t length,
+                         int flags, void *user_data) {
+    struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
+    struct http2_parser_context *context = h12_context->h2;
+    if (h12_context->callbacks && h12_context->callbacks->raw_output) {
+        h12_context->callbacks->raw_output(h12_context->attachment, (const char *) data, length);
+    }
+    return length;
+}
+
 int on_frame_recv_callback(nghttp2_session *session _U_,
                            const nghttp2_frame *frame, void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
@@ -151,6 +163,11 @@ int on_frame_recv_callback(nghttp2_session *session _U_,
     context->last_stream_id = -1;
     context->last_frame_type = -1;
 #endif
+
+    if (frame->hd.type == NGHTTP2_SETTINGS) {
+        nghttp2_session_send(session);
+        return 0;
+    }
 
     iter = kh_get(h2_streams_ht, context->streams, (khint32_t) frame->hd.stream_id);
     not_found = (iter == kh_end(context->streams));
@@ -302,6 +319,7 @@ int error_callback(nghttp2_session *session, const char *msg,
 
 
 int http2_parser_init(struct http_parser_context *h12_context) {
+    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_init()");
     int                         status = 0;
     nghttp2_session             *ngh2_session;
     nghttp2_session_callbacks   *ngh2_callbacks;
@@ -344,6 +362,9 @@ int http2_parser_init(struct http_parser_context *h12_context) {
     // error
     nghttp2_session_callbacks_set_error_callback(ngh2_callbacks, error_callback);
 
+    // output callback
+    nghttp2_session_callbacks_set_send_callback(ngh2_callbacks, on_send_callback);
+
     switch (h12_context->type) {
         case HTTP_SERVER_CONNECTION:
             status = nghttp2_session_server_new(&ngh2_session, ngh2_callbacks, h12_context);
@@ -361,7 +382,7 @@ int http2_parser_init(struct http_parser_context *h12_context) {
 
     if (status != 0) {
         fprintf(stderr, "nghttp2 returned non-zero status: %d\n", status);
-        return status;
+        goto finish;
     }
 
     h12_context->h2 = malloc(sizeof(struct http2_parser_context));
@@ -371,17 +392,23 @@ int http2_parser_init(struct http_parser_context *h12_context) {
 
     h12_context->h2->streams = kh_init(h2_streams_ht);
 
-    return 0;
+    finish:
+    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_init() returned %d\n", status);
+    return status;
 }
 
 
 int http2_parser_input(struct http_parser_context *h12_context, const char *data, size_t len) {
     ssize_t nbytes;
+    int r = 0;
 
     if (h12_context == NULL || data == NULL || len == 0) return -1;
+    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_input(h12_context=%p, len=%d)", h12_context, (int) len);
 
     if (nghttp2_session_want_read(h12_context->h2->session) == 0) {
-        LOG_AND_RETURN("nghttp2_session_want_read = 0", -1);
+        logger_log(h12_context->log, LOG_LEVEL_WARN, "nghttp2_session_want_read == 0\n");
+        r = -1;
+        goto finish;
     }
 
     nbytes = nghttp2_session_mem_recv(h12_context->h2->session, (const uint8_t *) data, len);
@@ -389,13 +416,17 @@ int http2_parser_input(struct http_parser_context *h12_context, const char *data
 
     if (nbytes < 0) printf("ERROR: %s.\n", nghttp2_strerror((int) nbytes));
 
-    return 0;
+    finish:
+    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_input() returned %d\n", r);
+    return r;
 }
 
 
 int http2_parser_close(struct http_parser_context *h12_context)  {
+    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_close(h12_context=%p)", h12_context);
     struct http2_parser_context *context = h12_context->h2;
     khiter_t iter;
+    int r = 0;
 
     if (context == NULL) return -1;
 
@@ -419,5 +450,19 @@ int http2_parser_close(struct http_parser_context *h12_context)  {
     free(context);
     h12_context->h2 = NULL;
 
-    return 0;
+    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_close() returned %d\n", r);
+    return r;
+}
+
+static const char HTTP2_EMPTY_SETTINGS[] = {
+        0x00, 0x00, 0x00, /* length */
+        0x04, 0x00, /* settings, no flags */
+        0x00, 0x00, 0x00, 0x00 /* stream 0 */
+};
+static const size_t HTTP2_EMPTY_SETTINGS_LEN = sizeof(HTTP2_EMPTY_SETTINGS);
+
+int http_parser_h2_send_settings(struct http_parser_context *h12_context) {
+    nghttp2_session *session = h12_context->h2->session;
+    nghttp2_submit_settings(session, 0, NULL, 0);
+    nghttp2_session_send(session);
 }
