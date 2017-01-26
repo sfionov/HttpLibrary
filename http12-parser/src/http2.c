@@ -6,8 +6,9 @@
 #include "http2.h"
 #include "util.h"
 
-#define H2P_DEBUG printf("h2p: %s\n", __func__);
-#define LOG_AND_RETURN(m, r) do { printf("h2p: %s\n", m); return r; } while(0)
+// #define H2P_DEBUG printf("h2p: %s\n", __func__);
+// #define LOG_AND_RETURN(m, r) do { printf("h2p: %s\n", m); return r; } while(0)
+#define CTX_LOG(args...) logger_log(h12_context->log, args)
 
 static void on_end_headers(const nghttp2_frame *frame, const struct http_parser_context *h12_context,
                            const struct http2_stream_context *stream);
@@ -19,36 +20,39 @@ void stream_destroy(struct http2_stream_context *stream) {
 int on_begin_frame_callback(nghttp2_session *session,
                             const nghttp2_frame_hd *hd,
                             void *user_data) {
-    struct http_parser_context *context = (struct http_parser_context*) user_data;
+    struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
+    CTX_LOG(LOG_LEVEL_TRACE, "on_begin_frame_callback(session=%p, h12_context=%p)", session, h12_context);
     h2p_frame_type frame_type;
     int32_t stream_id;
-
-    H2P_DEBUG
+    int r = 0;
 
 //    context->last_frame_type = hd->type;
 //    context->last_stream_id = hd->stream_id;
 
     //context->callbacks->h2_frame(context, last_stream_id, last_frame_type, NULL);
 
-    return 0;
+    CTX_LOG(LOG_LEVEL_TRACE, "on_begin_frame_callback() returned %d", r);
+    return r;
 }
 
 int on_begin_headers_callback(nghttp2_session *session _U_,
                               const nghttp2_frame *frame,
                               void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*)user_data;
+    CTX_LOG(LOG_LEVEL_TRACE, "on_begin_headers_callback(session=%p, h12_context=%p)", session, h12_context);
     struct http2_parser_context *context = h12_context->h2;
     struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0, push_ret = 0;
-
-    H2P_DEBUG
+    int r = 0;
 
     iter = kh_get(h2_streams_ht, context->streams, (khint32_t) frame->hd.stream_id);
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
+        CTX_LOG(LOG_LEVEL_ERROR, "ERROR: Stream table corrupted!");
+        r = -1;
+        goto finish;
     } else {
         stream = kh_value(context->streams, iter);
     }
@@ -70,7 +74,9 @@ int on_begin_headers_callback(nghttp2_session *session _U_,
     stream->headers->fields = realloc(stream->headers->fields, stream->headers->allocated_field_count *
                                   sizeof(struct http_header_field));
 
-    return 0;
+    finish:
+    CTX_LOG(LOG_LEVEL_TRACE, "on_begin_headers_callback() returned %d", r);
+    return r;
 }
 
 int on_header_callback(nghttp2_session *session _U_,
@@ -79,25 +85,29 @@ int on_header_callback(nghttp2_session *session _U_,
                        size_t valuelen, uint8_t flags _U_,
                        void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
+    CTX_LOG(LOG_LEVEL_TRACE, "on_header_callback(session=%p, h12_context=%p, name=%.*s, value=%.*s)", session, h12_context, namelen, name, valuelen, value);
     struct http2_parser_context *context = h12_context->h2;
     struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0, push_ret = 0;
-
-    H2P_DEBUG
+    int r = 0;
 
     iter = kh_get(h2_streams_ht, context->streams, (khint32_t) frame->hd.stream_id);
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
+        CTX_LOG(LOG_LEVEL_ERROR, "ERROR: Stream table corrupted!");
+        r = NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
+        goto finish;
     } else {
         stream = kh_value(context->streams, iter);
     }
 
     struct http_headers *headers = stream->headers;
     if (stream->headers == NULL) {
-        H2P_DEBUG("WARNING: Memory for header was not allocated!\n");
+        CTX_LOG(LOG_LEVEL_WARN, "WARNING: Memory for header was not allocated!\n");
+        r = NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
+        goto finish;
     }
 
     if (headers->field_count == headers->allocated_field_count) {
@@ -116,30 +126,36 @@ int on_header_callback(nghttp2_session *session _U_,
 
     headers->field_count++;
 
-    return 0;
+    finish:
+    CTX_LOG(LOG_LEVEL_TRACE, "on_header_callback() returned %d", r);
+    return r;
 }
 
 ssize_t on_send_callback(nghttp2_session *session,
                          const uint8_t *data, size_t length,
                          int flags, void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
+    CTX_LOG(LOG_LEVEL_TRACE, "on_send_callback(session=%p, h12_context=%p, data=%p, length=%d, flags=0x%x)", session, h12_context, data, length, flags);
     struct http2_parser_context *context = h12_context->h2;
+
     if (h12_context->callbacks && h12_context->callbacks->raw_output) {
         h12_context->callbacks->raw_output(h12_context->attachment, (const char *) data, length);
     }
+
+    CTX_LOG(LOG_LEVEL_TRACE, "on_send_callback() returned length %d", length);
     return length;
 }
 
 int on_frame_recv_callback(nghttp2_session *session _U_,
                            const nghttp2_frame *frame, void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
+    CTX_LOG(LOG_LEVEL_TRACE, "on_frame_recv_callback(session=%p, h12_context=%p)", session, h12_context);
     struct http2_parser_context *context = h12_context->h2;
     nghttp2_frame_hd *hd = (nghttp2_frame_hd *)frame;
     struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0, push_ret = 0;
-
-    H2P_DEBUG
+    int r = 0;
 
     // FIXME: WTF?
 #if 0
@@ -165,23 +181,29 @@ int on_frame_recv_callback(nghttp2_session *session _U_,
 #endif
 
     if (frame->hd.type == NGHTTP2_SETTINGS) {
+        // Processing SETTINGS frame automatically adds ACK to outbound queue, so flush it.
         nghttp2_session_send(session);
-        return 0;
+        r = 0;
+        goto finish;
     }
 
     iter = kh_get(h2_streams_ht, context->streams, (khint32_t) frame->hd.stream_id);
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
+        CTX_LOG(LOG_LEVEL_ERROR, "ERROR: Stream table corrupted!");
+        r = NGHTTP2_ERR_INVALID_STATE;
+        goto finish;
     } else {
         stream = kh_value(context->streams, iter);
     }
 
     /*
-     * Documentation ays that there is no ..._end_... callbacks, and this callback is fired after
+     * Documentation says that there is no ..._end_... callbacks, and this callback is fired after
      * all frametype-specific callbacks.
      * So if we need to do some finishing frametype-specific work, it must be done here.
+     * Also, all CONTINUATION frames are automatically merged into previous by nghttp2,
+     * and we don't need to process them separately.
      */
     switch (frame->hd.type) {
         case NGHTTP2_HEADERS:
@@ -194,14 +216,18 @@ int on_frame_recv_callback(nghttp2_session *session _U_,
             break;
     }
 
-    return 0;
+    finish:
+    CTX_LOG(LOG_LEVEL_TRACE, "on_frame_recv_callback() returned %d", r);
+    return r;
 }
 
 static void on_end_headers(const nghttp2_frame *frame, const struct http_parser_context *h12_context, 
                            const struct http2_stream_context *stream) {
+    CTX_LOG(LOG_LEVEL_TRACE, "on_end_headers(h12_context=%p)", h12_context);
     if (h12_context->callbacks && h12_context->callbacks->h2_headers) {
         h12_context->callbacks->h2_headers(h12_context->attachment, stream->headers, frame->headers.hd.stream_id);
     }
+    CTX_LOG(LOG_LEVEL_TRACE, "on_end_headers() finished");
 }
 
 int on_data_chunk_recv_callback(nghttp2_session *session _U_,
@@ -209,22 +235,28 @@ int on_data_chunk_recv_callback(nghttp2_session *session _U_,
                                 const uint8_t *data, size_t len,
                                 void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
+    CTX_LOG(LOG_LEVEL_TRACE,
+            "on_data_chunk_recv_callback(session=%p, h12_context=%p, flags=0x%x, stream_id=%d, len=%d)",
+            session, h12_context, flags, stream_id, len);
     struct http2_parser_context *context = h12_context->h2;
     struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0, push_ret = 0;
-
-    H2P_DEBUG
+    int r = 0;
 
     iter = kh_get(h2_streams_ht, context->streams, stream_id);
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("Data before headers, this is incorrect\n", NGHTTP2_ERR_INVALID_STATE);
+        CTX_LOG(LOG_LEVEL_ERROR, "Data before headers, this is incorrect");
+        r = NGHTTP2_ERR_INVALID_STATE;
+        goto finish;
     } else {
         stream = kh_value(context->streams, iter);
         if (stream->id != stream_id) {
-            LOG_AND_RETURN("ERROR: Stream table corrupted!\n", NGHTTP2_ERR_INVALID_STATE);
+            CTX_LOG(LOG_LEVEL_ERROR, "ERROR: Stream table corrupted!");
+            r = NGHTTP2_ERR_INVALID_STATE;
+            goto finish;
         }
 
         if (h12_context->callbacks && h12_context->callbacks->h2_data_started) {
@@ -238,31 +270,39 @@ int on_data_chunk_recv_callback(nghttp2_session *session _U_,
         }
     }
 
-    return 0;
+    finish:
+    CTX_LOG(LOG_LEVEL_TRACE, "on_data_chunk_recv_callback() returned %d", r);
+    return r;
 }
 
 int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
                              uint32_t error_code, void *user_data) {
     struct http_parser_context *h12_context = (struct http_parser_context*) user_data;
+    CTX_LOG(LOG_LEVEL_TRACE,
+            "on_stream_close_callback(session=%p, h12_context=%p, stream_id=%d, error_code=%d)",
+            session, h12_context, stream_id, error_code);
     struct http2_parser_context *context = h12_context->h2;
     struct http2_stream_context *stream;
     khiter_t iter;
     int not_found = 0;
-
-    H2P_DEBUG
+    int r = 0;
 
     iter = kh_get(h2_streams_ht, context->streams, stream_id);
     not_found = (iter == kh_end(context->streams));
 
     if (not_found) {
-        LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
+        CTX_LOG(LOG_LEVEL_ERROR, "ERROR: Stream table corrupted!");
+        r = NGHTTP2_ERR_INVALID_STATE;
+        goto finish;
     } else {
         stream = kh_value(context->streams, iter);
 
         if (stream->id != stream_id) {
             stream_destroy(stream);
             kh_del(h2_streams_ht, context->streams, iter);
-            LOG_AND_RETURN("ERROR: Stream table corrupted!\n", -1);
+            CTX_LOG(LOG_LEVEL_ERROR, "ERROR: Stream table corrupted!");
+            r = NGHTTP2_ERR_INVALID_STATE;
+            goto finish;
         }
 
         if (stream->need_decode) {
@@ -273,11 +313,16 @@ int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
         // RST_STREAM
     }
 
-    h12_context->callbacks->h2_data_finished(h12_context->attachment, stream->headers, stream_id, error_code);
+    if (h12_context->callbacks && h12_context->callbacks->h2_data_finished) {
+        h12_context->callbacks->h2_data_finished(h12_context->attachment, stream->headers, stream_id, error_code);
+    }
 
     stream_destroy (stream);
     kh_del(h2_streams_ht, context->streams, iter);
-    return 0;
+
+    finish:
+    CTX_LOG(LOG_LEVEL_TRACE, "on_stream_close_callback() returned %d", r);
+    return r;
 }
 
 #if 1
@@ -286,40 +331,45 @@ int on_invalid_header_callback(
         nghttp2_session *session, const nghttp2_frame *frame, const uint8_t *name,
         size_t namelen, const uint8_t *value, size_t valuelen, uint8_t flags,
         void *user_data) {
-    struct http_parser_context *context = (struct http_parser_context*)user_data;
+    struct http_parser_context *h12_context = (struct http_parser_context*)user_data;
+    int r = 0;
 
-    H2P_DEBUG
-    return 0;
+    CTX_LOG(LOG_LEVEL_TRACE, "on_invalid_header_callback(session=%p, h12_context=%p, name=%.*s, value=%.*s)", session, h12_context, namelen, name, valuelen, value);
+    CTX_LOG(LOG_LEVEL_TRACE, "on_invalid_header_callback() returned %d", r);
+    return r;
 }
 
 int on_invalid_frame_recv_callback(nghttp2_session *session,
                                    const nghttp2_frame *frame,
                                    int lib_error_code,
                                    void *user_data) {
-    struct http_parser_context *context = (struct http_parser_context*)user_data;
+    struct http_parser_context *h12_context = (struct http_parser_context*)user_data;
+    int r = 0;
 
-    H2P_DEBUG
+    CTX_LOG(LOG_LEVEL_TRACE, "on_invalid_frame_recv_callback(session=%p, h12_context=%p, error_code=%d)", session, h12_context, lib_error_code);
 
     //context->callbacks->h2_error(context, H2P_ERROR_INVALID_FRAME, nghttp2_error_code);
-    return 0;
+    CTX_LOG(LOG_LEVEL_TRACE, "on_invalid_frame_recv_callback() returned %d", r);
+    return r;
 }
 
 #endif
 
 int error_callback(nghttp2_session *session, const char *msg,
                    size_t len, void *user_data) {
-    struct http_parser_context *context = (struct http_parser_context*)user_data;
+    struct http_parser_context *h12_context = (struct http_parser_context*)user_data;
+    int r = 0;
 
-    H2P_DEBUG;
+    CTX_LOG(LOG_LEVEL_TRACE, "error_callback(session=%p, h12_context=%p, msg=\"%.*s\")", session, h12_context, len, msg);
 
-    fprintf(stderr, "ERROR: %s:%d: %s", __func__, __LINE__, msg);
     // context->callbacks->h2_error(context, H2P_ERROR_MESSAGE, msg);
-    return 0;
+    CTX_LOG(LOG_LEVEL_TRACE, "error_callback() returned %d", r);
+    return r;
 }
 
 
 int http2_parser_init(struct http_parser_context *h12_context) {
-    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_init()");
+    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_init(h12_context=%p)", h12_context);
     int                         status = 0;
     nghttp2_session             *ngh2_session;
     nghttp2_session_callbacks   *ngh2_callbacks;
@@ -423,7 +473,7 @@ int http2_parser_input(struct http_parser_context *h12_context, const char *data
 
 
 int http2_parser_close(struct http_parser_context *h12_context)  {
-    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_close(h12_context=%p)", h12_context);
+    CTX_LOG(LOG_LEVEL_TRACE, "http2_parser_close(h12_context=%p)", h12_context);
     struct http2_parser_context *context = h12_context->h2;
     khiter_t iter;
     int r = 0;
@@ -450,7 +500,7 @@ int http2_parser_close(struct http_parser_context *h12_context)  {
     free(context);
     h12_context->h2 = NULL;
 
-    logger_log(h12_context->log, LOG_LEVEL_TRACE, "http2_parser_close() returned %d\n", r);
+    CTX_LOG(LOG_LEVEL_TRACE, "http2_parser_close() returned %d\n", r);
     return r;
 }
 
@@ -462,7 +512,52 @@ static const char HTTP2_EMPTY_SETTINGS[] = {
 static const size_t HTTP2_EMPTY_SETTINGS_LEN = sizeof(HTTP2_EMPTY_SETTINGS);
 
 int http_parser_h2_send_settings(struct http_parser_context *h12_context) {
+    CTX_LOG(LOG_LEVEL_TRACE, "http_parser_h2_send_settings(h12_context=%p)", h12_context);
     nghttp2_session *session = h12_context->h2->session;
-    nghttp2_submit_settings(session, 0, NULL, 0);
-    nghttp2_session_send(session);
+    int r = nghttp2_submit_settings(session, 0, NULL, 0);
+    if (r != 0) {
+        goto finish;
+    }
+    r = nghttp2_session_send(session);
+
+    finish:
+    CTX_LOG(LOG_LEVEL_TRACE, "http_parser_h2_send_settings() returned %d\n", r);
+    return r;
+}
+
+int http_parser_h2_send_headers(struct http_parser_context *h12_context, int32_t stream_id, struct http_headers *headers) {
+    CTX_LOG(LOG_LEVEL_TRACE, "http_parser_h2_send_headers(h12_context=%p, stream_id=%d)", h12_context, stream_id);
+    int r = 0;
+    nghttp2_nv *nva = malloc(sizeof(nghttp2_nv) * headers->field_count);
+
+    memset(nva, 0, sizeof(nghttp2_nv) * headers->field_count);
+    for (int i = 0; i < headers->field_count; i++) {
+        nva[i].name = (uint8_t *) headers->fields[i].name;
+        nva[i].namelen = headers->fields[i].name != NULL ? strlen(headers->fields[i].name) : 0;
+        nva[i].value = (uint8_t *) headers->fields[i].value;
+        nva[i].valuelen = headers->fields[i].value != NULL ? strlen(headers->fields[i].value) : 0;
+    }
+
+    nghttp2_session *session = h12_context->h2->session;
+    r = nghttp2_submit_headers(session, NGHTTP2_FLAG_END_HEADERS, stream_id, NULL, nva, (size_t) headers->field_count, NULL);
+    if (r != 0) {
+        goto finish;
+    }
+    r = nghttp2_session_send(session);
+
+    finish:
+    CTX_LOG(LOG_LEVEL_TRACE, "http_parser_h2_send_headers() returned %d\n", r);
+    return r;
+}
+
+int http_parser_h2_send_data(struct http_parser_context *h12_context, int32_t stream_id, const char *data, size_t len, bool eof) {
+
+}
+
+int http_parser_h2_reset_stream(struct http_parser_context *context, int32_t stream_id, int error_code) {
+
+}
+
+int http_parser_h2_goaway(struct http_parser_context *context, int error_code) {
+
 }

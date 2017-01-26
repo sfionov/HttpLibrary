@@ -7,14 +7,19 @@
 #include "logger.h"
 #include "parser.h"
 
+/* HTTP2 preface exact sequence */
 char HTTP2_PREFACE[] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 size_t HTTP2_PREFACE_LEN = sizeof(HTTP2_PREFACE) - 1;
+
+/* HTTP2 empty settings exact sequence (we always send empty settings) */
 char HTTP2_EMPTY_SETTINGS[] = {
         0x00, 0x00, 0x00, /* length */
         0x04, 0x00, /* settings, no flags */
         0x00, 0x00, 0x00, 0x00 /* stream 0 */
 };
 size_t HTTP2_EMPTY_SETTINGS_LEN = sizeof(HTTP2_EMPTY_SETTINGS);
+
+/* HTTP2 settings ack is always empty settings with ACK flag set */
 char HTTP2_SETTINGS_ACK[] = {
         0x00, 0x00, 0x00, /* length */
         0x04, 0x01, /* settings, no flags */
